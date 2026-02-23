@@ -1,0 +1,21 @@
+﻿version: 2
+
+models:
+  - name: stg_coin_markets
+    columns:
+      - name: as_of_ts
+        tests: [not_null]
+      - name: coin_id
+        tests: [not_null]
+
+  - name: dim_coin
+    columns:
+      - name: coin_id
+        tests: [not_null, unique]
+
+  - name: fact_coin_snapshot
+    columns:
+      - name: as_of_ts
+        tests: [not_null]
+      - name: coin_id
+        tests: [not_null]

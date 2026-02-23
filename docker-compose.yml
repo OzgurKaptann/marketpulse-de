@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: mp_postgres
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - mp_pgdata:/var/lib/postgresql/data
+      - ./warehouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  airflow:
+    image: apache/airflow:2.9.3
+    container_name: mp_airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__EXECUTOR: "SequentialExecutor"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "sqlite:////opt/airflow/airflow.db"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary==2.9.9 requests==2.32.3"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    command: >
+      bash -c "
+      airflow db migrate &&
+      airflow users create
+        --username ${AIRFLOW_USER}
+        --password ${AIRFLOW_PASSWORD}
+        --firstname Data
+        --lastname Engineer
+        --role Admin
+        --email admin@example.com || true &&
+      airflow webserver & airflow scheduler
+      "
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: mp_metabase
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${METABASE_PORT}:3000"
+
+  ingestion:
+    build:
+      context: ./ingestion
+    container_name: mp_ingestion
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DB: ${POSTGRES_DB}
+      PG_USER: ${POSTGRES_USER}
+      PG_PASSWORD: ${POSTGRES_PASSWORD}
+      VS_CURRENCY: usd
+      PER_PAGE: 50
+      PAGE: 1
+    profiles: ["manual"]
+
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.8.2
+    container_name: mp_dbt
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./dbt:/usr/app
+    working_dir: /usr/app
+    environment:
+      DBT_PROFILES_DIR: /usr/app
+    profiles: ["manual"]
+
+volumes:
+  mp_pgdata:

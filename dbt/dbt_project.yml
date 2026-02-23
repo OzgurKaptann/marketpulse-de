@@ -1,0 +1,21 @@
+﻿name: marketpulse
+version: '1.0'
+config-version: 2
+
+profile: marketpulse
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+models:
+  marketpulse:
+    +materialized: view
+    staging:
+      +schema: staging
+    marts:
+      +schema: marts
+      +materialized: view

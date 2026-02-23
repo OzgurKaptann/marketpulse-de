@@ -1,0 +1,18 @@
+﻿# Python
+__pycache__/
+*.pyc
+
+# Env
+.env
+
+# dbt
+dbt/target/
+dbt/logs/
+dbt/.user.yml
+
+# Airflow cache
+airflow/dags/__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db

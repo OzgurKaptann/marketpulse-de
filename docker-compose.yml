@@ -1,94 +1,129 @@
-services:
+﻿services:
   postgres:
     image: postgres:16
     container_name: mp_postgres
-    env_file: .env
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: marketpulse
+      POSTGRES_USER: marketpulse
+      POSTGRES_PASSWORD: CHANGE_ME_STRONG_PASSWORD
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "5432:5432"
     volumes:
-      - mp_pgdata:/var/lib/postgresql/data
-      - ./warehouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U marketpulse -d marketpulse"]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  airflow:
+  airflow-init:
     image: apache/airflow:2.9.3
-    container_name: mp_airflow
+    container_name: mp_airflow_init
     depends_on:
       postgres:
         condition: service_healthy
-    env_file: .env
+    env_file:
+      - .env
     environment:
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
-      AIRFLOW__CORE__EXECUTOR: "SequentialExecutor"
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "sqlite:////opt/airflow/airflow.db"
-      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
-      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary==2.9.9 requests==2.32.3"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://marketpulse:CHANGE_ME_STRONG_PASSWORD@mp_postgres:5432/marketpulse
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "False"
+      TZ: Europe/Istanbul
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        airflow db init
+        airflow db migrate
+        airflow connections create-default-connections
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
+        echo "AIRFLOW_INIT_DONE"
+
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    container_name: mp_airflow_webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://marketpulse:CHANGE_ME_STRONG_PASSWORD@mp_postgres:5432/marketpulse
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "False"
+      TZ: Europe/Istanbul
     ports:
       - "8080:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-    command: >
-      bash -c "
-      airflow db migrate &&
-      airflow users create
-        --username ${AIRFLOW_USER}
-        --password ${AIRFLOW_PASSWORD}
-        --firstname Data
-        --lastname Engineer
-        --role Admin
-        --email admin@example.com || true &&
-      airflow webserver & airflow scheduler
-      "
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./ingestion:/opt/airflow/ingestion
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: webserver
 
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    container_name: mp_airflow_scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://marketpulse:CHANGE_ME_STRONG_PASSWORD@mp_postgres:5432/marketpulse
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "False"
+      TZ: Europe/Istanbul
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./ingestion:/opt/airflow/ingestion
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: scheduler
+
+  dbt:
+    build:
+      context: ./dbt
+      dockerfile: Dockerfile
+    container_name: mp_dbt
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DBT_PROFILES_DIR: /usr/app
+      TZ: Europe/Istanbul
+    volumes:
+      - ./dbt:/usr/app
+    networks:
+      - default
   metabase:
     image: metabase/metabase:latest
     container_name: mp_metabase
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - .env
     ports:
-      - "${METABASE_PORT}:3000"
-
-  ingestion:
-    build:
-      context: ./ingestion
-    container_name: mp_ingestion
-    depends_on:
-      postgres:
-        condition: service_healthy
-    env_file: .env
-    environment:
-      PG_HOST: postgres
-      PG_PORT: 5432
-      PG_DB: ${POSTGRES_DB}
-      PG_USER: ${POSTGRES_USER}
-      PG_PASSWORD: ${POSTGRES_PASSWORD}
-      VS_CURRENCY: usd
-      PER_PAGE: 50
-      PAGE: 1
-    profiles: ["manual"]
-
-  dbt:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.8.2
-    container_name: mp_dbt
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./dbt:/usr/app
-    working_dir: /usr/app
-    environment:
-      DBT_PROFILES_DIR: /usr/app
-    profiles: ["manual"]
+      - "3000:3000"
 
 volumes:
-  mp_pgdata:
+  postgres_data:
+

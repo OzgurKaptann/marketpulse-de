@@ -1,0 +1,15 @@
+﻿# Deterministic dbt runtime constraints for ephemeral dbt runner
+# Goal: dbt-core 1.10.x + dbt-postgres 1.10.x without protobuf>=6 conflicts
+
+dbt-core==1.10.0
+dbt-postgres==1.10.0
+
+# Force adapter stack compatible with dbt-core 1.10.x
+dbt-adapters==1.15.2
+dbt-common==1.22.0
+dbt-semantic-interfaces==0.8.5
+dbt-protos==1.0.431
+dbt-extractor==0.6.0
+
+# protobuf bound required by dbt-core 1.10.x
+protobuf==5.29.6

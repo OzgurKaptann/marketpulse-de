@@ -1,13 +1,21 @@
-﻿from datetime import datetime, timezone
+﻿from __future__ import annotations
+
+from datetime import datetime, timezone, timedelta
 import time
 import requests
 import psycopg2
+import os
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.operators.bash import BashOperator
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
+
+# ---------------------------
+# INGEST FUNCTION
+# ---------------------------
 
 def ingest():
     as_of_ts = datetime.now(timezone.utc)
@@ -35,80 +43,123 @@ def ingest():
         raise RuntimeError(f"Failed to fetch data: {last_err}")
 
     conn = psycopg2.connect(
-        host="postgres",
-        port=5432,
-        dbname="marketpulse",
-        user="de_user",
-        password="de_pass",
+        host=os.getenv("POSTGRES_HOST", "mp_postgres"),
+        dbname=os.getenv("POSTGRES_DB", "marketpulse"),
+        user=os.getenv("POSTGRES_USER", "marketpulse"),
+        password=os.getenv("POSTGRES_PASSWORD", "CHANGE_ME_STRONG_PASSWORD"),
     )
 
     try:
         with conn.cursor() as cur:
-            cur.execute("""
+
+            cur.execute(
+                """
                 CREATE SCHEMA IF NOT EXISTS raw;
-
-                CREATE TABLE IF NOT EXISTS raw.coin_markets (
-                  as_of_ts TIMESTAMPTZ NOT NULL,
-                  coin_id TEXT NOT NULL,
-                  symbol TEXT,
-                  name TEXT,
-                  current_price NUMERIC,
-                  market_cap NUMERIC,
-                  total_volume NUMERIC,
-                  market_cap_rank INTEGER,
-                  price_change_percentage_24h NUMERIC,
-                  source TEXT DEFAULT 'coingecko',
-                  PRIMARY KEY (as_of_ts, coin_id)
-                );
-            """)
-
-            sql = """
-            INSERT INTO raw.coin_markets (
-              as_of_ts, coin_id, symbol, name,
-              current_price, market_cap, total_volume, market_cap_rank,
-              price_change_percentage_24h, source
+                """
             )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (as_of_ts, coin_id) DO UPDATE SET
-              symbol = EXCLUDED.symbol,
-              name = EXCLUDED.name,
-              current_price = EXCLUDED.current_price,
-              market_cap = EXCLUDED.market_cap,
-              total_volume = EXCLUDED.total_volume,
-              market_cap_rank = EXCLUDED.market_cap_rank,
-              price_change_percentage_24h = EXCLUDED.price_change_percentage_24h,
-              source = EXCLUDED.source;
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS raw.coin_markets (
+                    coin_id TEXT NOT NULL,
+                    symbol TEXT,
+                    name TEXT,
+                    current_price NUMERIC,
+                    market_cap NUMERIC,
+                    total_volume NUMERIC,
+                    market_cap_rank INTEGER,
+                    last_updated TIMESTAMPTZ,
+                    ingested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    source TEXT NOT NULL,
+                    vs_currency TEXT NOT NULL,
+                    page INTEGER NOT NULL,
+                    per_page INTEGER NOT NULL,
+                    PRIMARY KEY (coin_id, vs_currency, page, per_page)
+                );
+                """
+            )
+
+            insert_sql = """
+            INSERT INTO raw.coin_markets (
+                coin_id, symbol, name, current_price,
+                market_cap, total_volume, market_cap_rank,
+                last_updated, source,
+                vs_currency, page, per_page
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (coin_id, vs_currency, page, per_page)
+            DO UPDATE SET
+                symbol = EXCLUDED.symbol,
+                name = EXCLUDED.name,
+                current_price = EXCLUDED.current_price,
+                market_cap = EXCLUDED.market_cap,
+                total_volume = EXCLUDED.total_volume,
+                market_cap_rank = EXCLUDED.market_cap_rank,
+                last_updated = EXCLUDED.last_updated,
+                source = EXCLUDED.source,
+                ingested_at = now();
             """
 
             for row in data:
-                cur.execute(sql, (
-                    as_of_ts,
-                    row.get("id"),
-                    row.get("symbol"),
-                    row.get("name"),
-                    row.get("current_price"),
-                    row.get("market_cap"),
-                    row.get("total_volume"),
-                    row.get("market_cap_rank"),
-                    row.get("price_change_percentage_24h"),
-                    "coingecko",
-                ))
+                cur.execute(
+                    insert_sql,
+                    (
+                        row.get("id"),
+                        row.get("symbol"),
+                        row.get("name"),
+                        row.get("current_price"),
+                        row.get("market_cap"),
+                        row.get("total_volume"),
+                        row.get("market_cap_rank"),
+                        row.get("last_updated"),
+                        "coingecko",
+                        "usd",
+                        1,
+                        50,
+                    ),
+                )
 
         conn.commit()
+
     finally:
         conn.close()
 
-    print(f"Inserted/updated {len(data)} rows at {as_of_ts.isoformat()}")
+    print(f"Inserted/updated {len(data)} rows.")
 
+
+# ---------------------------
+# DAG CONFIG
+# ---------------------------
+
+default_args = {
+    "owner": "marketpulse",
+    "depends_on_past": False,
+    "retries": 1,
+    "retry_delay": timedelta(minutes=1),
+}
 
 with DAG(
     dag_id="mp_ingest_coin_markets",
     start_date=datetime(2025, 1, 1),
     schedule=None,
     catchup=False,
-    tags=["marketpulse", "ingestion"],
+    tags=["marketpulse", "ingestion", "dbt"],
+    default_args=default_args,
 ) as dag:
-    PythonOperator(
+
+    ingest_task = PythonOperator(
         task_id="ingest_coin_markets",
         python_callable=ingest,
     )
+
+    dbt_run = BashOperator(
+        task_id="dbt_run",
+        bash_command="docker exec mp_dbt dbt run --target dev",
+    )
+
+    dbt_test = BashOperator(
+        task_id="dbt_test",
+        bash_command="docker exec mp_dbt dbt test --target dev",
+    )
+
+    ingest_task >> dbt_run >> dbt_test

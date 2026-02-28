@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: marketpulse
+    description: 'MarketPulse raw sources in Postgres'
+    database: marketpulse
+    schema: raw
+    tables:
+      - name: coin_markets
+        description: 'Raw CoinGecko coin markets snapshots'
+        loaded_at_field: as_of_ts
+        freshness:
+          warn_after: {count: 30, period: minute}
+          error_after: {count: 180, period: minute}

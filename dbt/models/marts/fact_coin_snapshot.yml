@@ -1,0 +1,32 @@
+﻿version: 2
+
+models:
+  - name: fact_coin_snapshot
+    description: "Snapshot fact table for coin market data (per ingestion run)"
+    columns:
+      - name: as_of_ts
+        tests: [not_null]
+
+      - name: coin_id
+        tests: [not_null]
+
+      - name: current_price
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+
+      - name: total_volume
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+      - name: market_cap
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+      - name: market_cap_rank
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "> 0"

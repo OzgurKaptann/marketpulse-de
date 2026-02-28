@@ -13,9 +13,9 @@ snapshot-paths: ["snapshots"]
 
 models:
   marketpulse:
-    +materialized: view
     staging:
-      +schema: staging
+      +schema: "{{ env_var('DB_SCHEMA_STAGING', 'analytics_staging') }}"
+      +materialized: view
     marts:
-      +schema: marts
+      +schema: "{{ env_var('DB_SCHEMA_MARTS', 'analytics_marts') }}"
       +materialized: view

@@ -8,5 +8,5 @@
       user: "{{ env_var('POSTGRES_USER', 'postgres') }}"
       password: "{{ env_var('POSTGRES_PASSWORD', 'postgres') }}"
       dbname: "{{ env_var('POSTGRES_DB', 'marketpulse') }}"
-      schema: "{{ env_var('DB_SCHEMA_STAGING', 'analytics') }}"
+      schema: "analytics"
       threads: "{{ env_var('DBT_THREADS', '4') | int }}"

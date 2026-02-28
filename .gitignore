@@ -28,3 +28,5 @@ venv/
 
 # --- Env ---
 .env
+
+dbt/.user.yml

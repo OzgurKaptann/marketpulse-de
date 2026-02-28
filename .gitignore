@@ -1,18 +1,30 @@
-﻿# Python
-__pycache__/
-*.pyc
+﻿# --- Airflow ---
+airflow/logs/
+airflow/**/logs/
+**/logs/
 
-# Env
-.env
-
-# dbt
+# --- dbt ---
+dbt/dbt_packages/
 dbt/target/
 dbt/logs/
-dbt/.user.yml
 
-# Airflow cache
-airflow/dags/__pycache__/
-
-# OS
+# --- Local/backup files ---
+*.bak
+*.bad
+*.BROKEN_*
+docker-compose*.yml.bak*
+docker-compose*.yml.bad
+docker-compose*.yml.BROKEN_*
+docker-compose.yml.*
+*._old
 .DS_Store
 Thumbs.db
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Env ---
+.env
